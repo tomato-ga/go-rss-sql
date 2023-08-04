@@ -2,16 +2,19 @@ package main
 
 import (
 	"fmt"
+	"go-rss-sql/dbmanager"
+	"go-rss-sql/extractor"
 	"go-rss-sql/rssList"
+	"go-rss-sql/uploader"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jinzhu/gorm"
+	"github.com/joho/godotenv"
 	"github.com/mmcdole/gofeed"
 )
-
-// TODO 画像をS3にwebpで保存してURL取得する
-// TODO DBに保存する
 
 // FeedResult is a structure to store the result
 type FeedResult struct {
@@ -26,6 +29,24 @@ func fetchFeed(url string, resultChan chan<- FeedResult, wg *sync.WaitGroup) {
 }
 
 func main() {
+	err := godotenv.Load(".env")
+	if err != nil {
+		fmt.Printf("Error loading .env file")
+	}
+
+	dbURL := "postgresql://postgres:example@192.168.0.25:5433/postgres"
+	db, err := gorm.Open("postgres", dbURL)
+	if err != nil {
+		fmt.Printf("Failed to connect to database: %s", err)
+		return
+	}
+	defer db.Close()
+
+	s3AccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+	s3SecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+
+	fmt.Printf("Access Key: %s, Secret Key: %s", s3AccessKey, s3SecretKey)
+
 	start := time.Now()
 	var wg sync.WaitGroup
 
@@ -49,6 +70,13 @@ func main() {
 		fmt.Println(result.Feed.Title)
 		fmt.Println(result.Feed.FeedType, result.Feed.FeedVersion)
 
+		// Save site and feed items to database
+		err = dbmanager.SaveSiteAndFeedItemsToDB(db, result.Feed.Title, "", result.Feed) // Please replace the second argument with the actual site URL
+		if err != nil {
+			fmt.Println("Failed to save to database: ", err)
+			continue
+		}
+
 		for _, item := range result.Feed.Items {
 			if item == nil {
 				break
@@ -57,7 +85,33 @@ func main() {
 			fmt.Println(item.Link)
 			fmt.Println(item.PublishedParsed.Format(time.RFC3339))
 
-			fmt.Printf("%+v\n", item)
+			// extract the image URL from the content
+			imageURL, err := extractor.ExtractImageURL(item.Content)
+			if err != nil || imageURL == "" {
+				// If imageURL is not found in the Content or an error occurred, try to extract from Description
+				imageURL, err = extractor.ExtractImageURL(item.Description)
+				if err != nil {
+					fmt.Println("Failed to extract image URL: ", err)
+				}
+			}
+
+			if imageURL != "" {
+				webpImage, err := extractor.ConvertToWebP(imageURL)
+				if err != nil {
+					fmt.Println("Failed to convert image to WebP: ", err)
+				} else {
+					// Generate a unique key for each image
+					objectKey := "photo/" + uuid.New().String() + ".webp"
+
+					// Upload the WebP image to S3
+					objectURL, err = uploader.UploadToS3(s3AccessKey, s3SecretKey, "rssphoto", objectKey, webpImage)
+					if err != nil {
+						fmt.Println("Failed to upload image to S3: ", err)
+					} else {
+						fmt.Println("Uploaded image to S3: ", objectKey)
+					}
+				}
+			}
 		}
 	}
 
