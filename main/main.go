@@ -16,7 +16,7 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
-// FeedResult is a structure to store the result
+// FeedResultは結果を格納するための構造体です
 type FeedResult struct {
 	Feed *gofeed.Feed
 	Err  error
@@ -34,8 +34,9 @@ func main() {
 		fmt.Printf("Error loading .env file")
 	}
 
-	dbURL := "postgresql://postgres:example@192.168.0.25:5433/postgres"
+	dbURL := "postgresql://postgres:example@192.168.0.25:5433/postgres?sslmode=disable"
 	db, err := gorm.Open("postgres", dbURL)
+
 	if err != nil {
 		fmt.Printf("Failed to connect to database: %s", err)
 		return
@@ -70,12 +71,7 @@ func main() {
 		fmt.Println(result.Feed.Title)
 		fmt.Println(result.Feed.FeedType, result.Feed.FeedVersion)
 
-		// Save site and feed items to database
-		err = dbmanager.SaveSiteAndFeedItemsToDB(db, result.Feed.Title, "", result.Feed) // Please replace the second argument with the actual site URL
-		if err != nil {
-			fmt.Println("Failed to save to database: ", err)
-			continue
-		}
+		var objectURLs []string // object URLを格納するためのスライスを新しく作成します
 
 		for _, item := range result.Feed.Items {
 			if item == nil {
@@ -85,33 +81,42 @@ func main() {
 			fmt.Println(item.Link)
 			fmt.Println(item.PublishedParsed.Format(time.RFC3339))
 
-			// extract the image URL from the content
+			// コンテンツから画像URLを抽出します
 			imageURL, err := extractor.ExtractImageURL(item.Content)
 			if err != nil || imageURL == "" {
-				// If imageURL is not found in the Content or an error occurred, try to extract from Description
+				// コンテンツ内にimageURLが見つからなかった場合、またはエラーが発生した場合は、Descriptionから抽出を試みます
 				imageURL, err = extractor.ExtractImageURL(item.Description)
 				if err != nil {
-					fmt.Println("Failed to extract image URL: ", err)
+					fmt.Println("画像URLの抽出に失敗しました: ", err)
 				}
 			}
 
 			if imageURL != "" {
 				webpImage, err := extractor.ConvertToWebP(imageURL)
 				if err != nil {
-					fmt.Println("Failed to convert image to WebP: ", err)
+					fmt.Println("WebPへの画像変換に失敗しました: ", err)
 				} else {
-					// Generate a unique key for each image
+					// それぞれの画像に対して一意のキーを生成します
 					objectKey := "photo/" + uuid.New().String() + ".webp"
 
-					// Upload the WebP image to S3
+					// S3にWebP画像をアップロードします
+					var objectURL string // objectURLをここで宣言します
 					objectURL, err = uploader.UploadToS3(s3AccessKey, s3SecretKey, "rssphoto", objectKey, webpImage)
 					if err != nil {
-						fmt.Println("Failed to upload image to S3: ", err)
+						fmt.Println("S3への画像アップロードに失敗しました: ", err)
 					} else {
-						fmt.Println("Uploaded image to S3: ", objectKey)
+						fmt.Println("S3へ画像をアップロードしました: ", objectKey)
+						objectURLs = append(objectURLs, objectURL) // object URLをスライスに追加します
 					}
 				}
 			}
+		}
+
+		// サイトとフィードアイテムをデータベースに保存します
+		err = dbmanager.SaveSiteAndFeedItemsToDB(db, result.Feed.Title, "", result.Feed, objectURLs) // objectURLsを関数に渡します
+		if err != nil {
+			fmt.Println("データベースへの保存に失敗しました: ", err)
+			continue
 		}
 	}
 

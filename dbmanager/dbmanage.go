@@ -26,7 +26,7 @@ type Rss struct {
 	ImgURL      string
 }
 
-func SaveSiteAndFeedItemsToDB(db *gorm.DB, siteName, siteURL string, feed *gofeed.Feed) error {
+func SaveSiteAndFeedItemsToDB(db *gorm.DB, siteName, siteURL string, feed *gofeed.Feed, objectURLs []string) error {
 	db.AutoMigrate(&Site{}, &Rss{})
 
 	var site Site
@@ -41,7 +41,7 @@ func SaveSiteAndFeedItemsToDB(db *gorm.DB, siteName, siteURL string, feed *gofee
 		}
 	}
 
-	for _, item := range feed.Items {
+	for i, item := range feed.Items {
 		publishedAt, err := time.Parse(time.RFC1123, item.Published)
 		if err != nil {
 			publishedAt = time.Now()
@@ -53,7 +53,7 @@ func SaveSiteAndFeedItemsToDB(db *gorm.DB, siteName, siteURL string, feed *gofee
 			PublishedAt: publishedAt,
 			SiteID:      site.ID,
 			Description: item.Description,
-			ImgURL:      "", // TODO: Set the actual image URL
+			ImgURL:      objectURLs[i], // Set the actual image URL
 		}
 		if err := db.Create(&rss).Error; err != nil {
 			return fmt.Errorf("failed to insert new RSS item: %w", err)
