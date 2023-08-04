@@ -13,7 +13,12 @@ type Site struct {
 	gorm.Model
 	Name string `gorm:"unique"`
 	URL  string `gorm:"unique"`
-	Rss  []Rss
+	Rss  []Rss  `gorm:"foreignkey:SiteID"`
+}
+
+// TableName sets the insert table name for this struct type
+func (Site) TableName() string {
+	return "sites"
 }
 
 type Rss struct {
@@ -24,6 +29,12 @@ type Rss struct {
 	SiteID      uint
 	Description string
 	ImgURL      string
+	Tag         string
+}
+
+// TableName sets the insert table name for this struct type
+func (Rss) TableName() string {
+	return "rsses"
 }
 
 func SaveSiteAndFeedItemsToDB(db *gorm.DB, siteName, siteURL string, feed *gofeed.Feed, objectURLs []string) error {
@@ -47,6 +58,14 @@ func SaveSiteAndFeedItemsToDB(db *gorm.DB, siteName, siteURL string, feed *gofee
 			publishedAt = time.Now()
 		}
 
+		tags := ""
+		for _, tag := range item.Categories {
+			if tags != "" {
+				tags += ", "
+			}
+			tags += tag
+		}
+
 		rss := Rss{
 			Title:       item.Title,
 			Link:        item.Link,
@@ -54,6 +73,7 @@ func SaveSiteAndFeedItemsToDB(db *gorm.DB, siteName, siteURL string, feed *gofee
 			SiteID:      site.ID,
 			Description: item.Description,
 			ImgURL:      objectURLs[i], // Set the actual image URL
+			Tag:         tags,
 		}
 		if err := db.Create(&rss).Error; err != nil {
 			return fmt.Errorf("failed to insert new RSS item: %w", err)

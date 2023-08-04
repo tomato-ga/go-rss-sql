@@ -7,6 +7,7 @@ import (
 	"go-rss-sql/rssList"
 	"go-rss-sql/uploader"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,12 +21,17 @@ import (
 type FeedResult struct {
 	Feed *gofeed.Feed
 	Err  error
+	Tags []string
 }
 
 func fetchFeed(url string, resultChan chan<- FeedResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 	feed, err := gofeed.NewParser().ParseURL(url)
-	resultChan <- FeedResult{Feed: feed, Err: err}
+	tags := make([]string, len(feed.Items))
+	for i, item := range feed.Items {
+		tags[i] = strings.Join(item.Categories, ", ")
+	}
+	resultChan <- FeedResult{Feed: feed, Err: err, Tags: tags}
 }
 
 func main() {
@@ -73,13 +79,14 @@ func main() {
 
 		var objectURLs []string // object URLを格納するためのスライスを新しく作成します
 
-		for _, item := range result.Feed.Items {
+		for i, item := range result.Feed.Items {
 			if item == nil {
 				break
 			}
 			fmt.Println(item.Title)
 			fmt.Println(item.Link)
 			fmt.Println(item.PublishedParsed.Format(time.RFC3339))
+			fmt.Println(result.Tags[i])
 
 			// コンテンツから画像URLを抽出します
 			imageURL, err := extractor.ExtractImageURL(item.Content)
@@ -113,7 +120,7 @@ func main() {
 		}
 
 		// サイトとフィードアイテムをデータベースに保存します
-		err = dbmanager.SaveSiteAndFeedItemsToDB(db, result.Feed.Title, "", result.Feed, objectURLs) // objectURLsを関数に渡します
+		err = dbmanager.SaveSiteAndFeedItemsToDB(db, result.Feed.Title, result.Feed.Link, result.Feed, objectURLs) // Site URLを引数として渡します
 		if err != nil {
 			fmt.Println("データベースへの保存に失敗しました: ", err)
 			continue
