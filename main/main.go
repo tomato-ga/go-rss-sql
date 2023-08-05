@@ -6,6 +6,7 @@ import (
 	"go-rss-sql/extractor"
 	"go-rss-sql/rssList"
 	"go-rss-sql/uploader"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -17,7 +18,6 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
-// FeedResultは結果を格納するための構造体です
 type FeedResult struct {
 	Feed *gofeed.Feed
 	Err  error
@@ -35,16 +35,23 @@ func fetchFeed(url string, resultChan chan<- FeedResult, wg *sync.WaitGroup) {
 }
 
 func main() {
-	err := godotenv.Load(".env")
+	// ログファイルの設定
+	logFile, err := os.OpenFile("/home/don/docker/go/go-rss-sql/app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		fmt.Printf("Error loading .env file")
+		log.Fatalf("Failed to open log file: %s", err)
+	}
+	defer logFile.Close()
+	log.SetOutput(logFile)
+
+	err = godotenv.Load(".env")
+	if err != nil {
+		log.Printf("Error loading .env file: %s", err)
 	}
 
 	dbURL := "postgresql://postgres:example@192.168.0.25:5433/postgres?sslmode=disable"
 	db, err := gorm.Open("postgres", dbURL)
-
 	if err != nil {
-		fmt.Printf("Failed to connect to database: %s", err)
+		log.Printf("Failed to connect to database: %s", err)
 		return
 	}
 	defer db.Close()
@@ -70,14 +77,14 @@ func main() {
 
 	for result := range resultChan {
 		if result.Err != nil {
-			fmt.Fprintln(os.Stderr, result.Err)
+			log.Printf("Error fetching feed: %s", result.Err)
 			continue
 		}
 
 		fmt.Println(result.Feed.Title)
 		fmt.Println(result.Feed.FeedType, result.Feed.FeedVersion)
 
-		var objectURLs []string // object URLを格納するためのスライスを新しく作成します
+		var objectURLs []string
 
 		for i, item := range result.Feed.Items {
 			if item == nil {
@@ -88,41 +95,35 @@ func main() {
 			fmt.Println(item.PublishedParsed.Format(time.RFC3339))
 			fmt.Println(result.Tags[i])
 
-			// コンテンツから画像URLを抽出します
 			imageURL, err := extractor.ExtractImageURL(item.Content)
 			if err != nil || imageURL == "" {
-				// コンテンツ内にimageURLが見つからなかった場合、またはエラーが発生した場合は、Descriptionから抽出を試みます
 				imageURL, err = extractor.ExtractImageURL(item.Description)
 				if err != nil {
-					fmt.Println("画像URLの抽出に失敗しました: ", err)
+					log.Printf("画像URLの抽出に失敗しました: %s", err)
 				}
 			}
 
 			if imageURL != "" {
 				webpImage, err := extractor.ConvertToWebP(imageURL)
 				if err != nil {
-					fmt.Println("WebPへの画像変換に失敗しました: ", err)
+					log.Printf("WebPへの画像変換に失敗しました: %s", err)
 				} else {
-					// それぞれの画像に対して一意のキーを生成します
 					objectKey := "photo/" + uuid.New().String() + ".webp"
 
-					// S3にWebP画像をアップロードします
-					var objectURL string // objectURLをここで宣言します
-					objectURL, err = uploader.UploadToS3(s3AccessKey, s3SecretKey, "rssphoto", objectKey, webpImage)
+					objectURL, err := uploader.UploadToS3(s3AccessKey, s3SecretKey, "rssphoto", objectKey, webpImage)
 					if err != nil {
-						fmt.Println("S3への画像アップロードに失敗しました: ", err)
+						log.Printf("S3への画像アップロードに失敗しました: %s", err)
 					} else {
 						fmt.Println("S3へ画像をアップロードしました: ", objectKey)
-						objectURLs = append(objectURLs, objectURL) // object URLをスライスに追加します
+						objectURLs = append(objectURLs, objectURL)
 					}
 				}
 			}
 		}
 
-		// サイトとフィードアイテムをデータベースに保存します
-		err = dbmanager.SaveSiteAndFeedItemsToDB(db, result.Feed.Title, result.Feed.Link, result.Feed, objectURLs) // Site URLを引数として渡します
+		err = dbmanager.SaveSiteAndFeedItemsToDB(db, result.Feed.Title, result.Feed.Link, result.Feed, objectURLs)
 		if err != nil {
-			fmt.Println("データベースへの保存に失敗しました: ", err)
+			log.Printf("データベースへの保存に失敗しました: %s", err)
 			continue
 		}
 	}
