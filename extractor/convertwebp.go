@@ -1,7 +1,9 @@
 package extractor
 
 import (
+	"errors"
 	"image"
+	_ "image/gif"  // Required to identify gif images
 	_ "image/jpeg" // This is required to decode jpeg images
 	_ "image/png"  // This is required to decode png images
 	"net/http"
@@ -18,13 +20,18 @@ func ConvertToWebP(url string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	// Decode the image
-	img, _, err := image.Decode(resp.Body)
+	img, format, err := image.Decode(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
+	// If the image format is GIF, return an error
+	if format == "gif" {
+		return nil, errors.New("GIF images are not supported")
+	}
+
 	// Convert to webp
-	quality := float32(75) // Or whatever quality level you want.
+	quality := float32(85) // Or whatever quality level you want.
 	webpData, err := webp.EncodeRGB(img, quality)
 	if err != nil {
 		return nil, err

@@ -7,6 +7,7 @@ import (
 	"go-rss-sql/rssList"
 	"go-rss-sql/uploader"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -26,7 +27,16 @@ type FeedResult struct {
 
 func fetchFeed(url string, resultChan chan<- FeedResult, wg *sync.WaitGroup) {
 	defer wg.Done()
-	feed, err := gofeed.NewParser().ParseURL(url)
+
+	// タイムアウトを4秒に設定したカスタムHTTPクライアントを作成
+	customClient := &http.Client{
+		Timeout: 4 * time.Second,
+	}
+
+	fp := gofeed.NewParser()
+	fp.Client = customClient // カスタムクライアントをgofeedのパーサーにセット
+
+	feed, err := fp.ParseURL(url)
 	if err != nil {
 		resultChan <- FeedResult{Err: err}
 		return

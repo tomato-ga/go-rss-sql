@@ -901,3 +901,5 @@ var Rss_urls = []string{
 	"https://072erodouga.com/comments/feed/",
 	"http://c5h7.com/feed/",
 }
+
+// たしか40ページ目まで
