@@ -27,6 +27,11 @@ type FeedResult struct {
 func fetchFeed(url string, resultChan chan<- FeedResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 	feed, err := gofeed.NewParser().ParseURL(url)
+	if err != nil {
+		resultChan <- FeedResult{Err: err}
+		return
+	}
+
 	tags := make([]string, len(feed.Items))
 	for i, item := range feed.Items {
 		tags[i] = strings.Join(item.Categories, ", ")
@@ -36,19 +41,19 @@ func fetchFeed(url string, resultChan chan<- FeedResult, wg *sync.WaitGroup) {
 
 func main() {
 	// ログファイルの設定
-	logFile, err := os.OpenFile("/home/don/docker/go/go-rss-sql/app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile("./app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatalf("Failed to open log file: %s", err)
 	}
 	defer logFile.Close()
 	log.SetOutput(logFile)
 
-	err = godotenv.Load(".env")
+	err = godotenv.Load("/home/don/docker/go/go-rss-sql/main/.env")
 	if err != nil {
 		log.Printf("Error loading .env file: %s", err)
 	}
 
-	dbURL := "postgresql://postgres:example@192.168.0.25:5433/postgres?sslmode=disable"
+	dbURL := "postgresql://postgres:dondonbex@54.64.237.55:5432/postgres?sslmode=disable"
 	db, err := gorm.Open("postgres", dbURL)
 	if err != nil {
 		log.Printf("Failed to connect to database: %s", err)
@@ -58,7 +63,6 @@ func main() {
 
 	s3AccessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	s3SecretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
-
 	fmt.Printf("Access Key: %s, Secret Key: %s", s3AccessKey, s3SecretKey)
 
 	start := time.Now()
@@ -87,9 +91,12 @@ func main() {
 		var objectURLs []string
 
 		for i, item := range result.Feed.Items {
-			if item == nil {
-				break
+			var existingRss dbmanager.Rss
+			if !db.Where("link = ?", item.Link).First(&existingRss).RecordNotFound() {
+				fmt.Printf("RSSアイテム '%s' は既にデータベースに存在します。アップロードおよび保存をスキップします。\n", item.Link)
+				continue
 			}
+
 			fmt.Println(item.Title)
 			fmt.Println(item.Link)
 			fmt.Println(item.PublishedParsed.Format(time.RFC3339))
@@ -100,6 +107,7 @@ func main() {
 				imageURL, err = extractor.ExtractImageURL(item.Description)
 				if err != nil {
 					log.Printf("画像URLの抽出に失敗しました: %s", err)
+					continue
 				}
 			}
 
@@ -107,24 +115,27 @@ func main() {
 				webpImage, err := extractor.ConvertToWebP(imageURL)
 				if err != nil {
 					log.Printf("WebPへの画像変換に失敗しました: %s", err)
-				} else {
-					objectKey := "photo/" + uuid.New().String() + ".webp"
+					continue
+				}
 
-					objectURL, err := uploader.UploadToS3(s3AccessKey, s3SecretKey, "rssphoto", objectKey, webpImage)
-					if err != nil {
-						log.Printf("S3への画像アップロードに失敗しました: %s", err)
-					} else {
-						fmt.Println("S3へ画像をアップロードしました: ", objectKey)
-						objectURLs = append(objectURLs, objectURL)
-					}
+				objectKey := "photo/" + uuid.New().String() + ".webp"
+				objectURL, err := uploader.UploadToS3(s3AccessKey, s3SecretKey, "erorice", objectKey, webpImage)
+				if err != nil {
+					log.Printf("S3への画像アップロードに失敗しました: %s", err)
+					continue
+				} else {
+					fmt.Println("S3へ画像をアップロードしました: ", objectKey)
+					objectURLs = append(objectURLs, objectURL)
 				}
 			}
 		}
 
-		err = dbmanager.SaveSiteAndFeedItemsToDB(db, result.Feed.Title, result.Feed.Link, result.Feed, objectURLs)
-		if err != nil {
-			log.Printf("データベースへの保存に失敗しました: %s", err)
-			continue
+		if len(objectURLs) > 0 {
+			err = dbmanager.SaveSiteAndFeedItemsToDB(db, result.Feed.Title, result.Feed.Link, result.Feed, objectURLs)
+			if err != nil {
+				log.Printf("データベースへの保存に失敗しました: %s", err)
+				continue
+			}
 		}
 	}
 
