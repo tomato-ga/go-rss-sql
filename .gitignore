@@ -1,2 +1,4 @@
 *.log
 .log
+main/app.log
+main/uploader.log

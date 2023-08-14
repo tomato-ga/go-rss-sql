@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,16 +47,7 @@ func fetchFeed(url string, resultChan chan<- FeedResult, wg *sync.WaitGroup) {
 
 func main() {
 
-	if len(os.Args) < 2 {
-		log.Fatalf("セグメントインデックスを指定してください")
-	}
-
-	segmentIndex, err := strconv.Atoi(os.Args[1])
-	if err != nil || segmentIndex < 0 || segmentIndex > 2 {
-		log.Fatalf("セグメントインデックスは0, 1, 2のいずれかでなければなりません")
-	}
-
-	urls := rssList.GetSegment(segmentIndex, 3)
+	urls := rssList.Rss_urls // すべてのURLを取得
 
 	// ログファイルの設定
 	logFile, err := os.OpenFile("./app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
@@ -88,8 +78,8 @@ func main() {
 	start := time.Now()
 	var wg sync.WaitGroup
 
-	resultChan := make(chan FeedResult, len(urls)) // `rssList.Rss_urls` を `urls` に変更
-	for _, url := range urls {                     // `rssList.Rss_urls` を `urls` に変更
+	resultChan := make(chan FeedResult, len(urls))
+	for _, url := range urls {
 		wg.Add(1)
 		go fetchFeed(url, resultChan, &wg)
 	}
@@ -118,7 +108,14 @@ func main() {
 				continue
 			}
 
-			log.Printf("アイテムタイトル: %s, リンク: %s, 公開日: %s, タグ: %s", item.Title, item.Link, item.PublishedParsed.Format(time.RFC3339), result.Tags[i])
+			// 公開日がnilかどうかをチェックして、nilの場合はデフォルトの値を使用する
+			var publishedDate string
+			if item.PublishedParsed != nil {
+				publishedDate = item.PublishedParsed.Format(time.RFC3339)
+			} else {
+				publishedDate = "不明"
+			}
+			log.Printf("アイテムタイトル: %s, リンク: %s, 公開日: %s, タグ: %s", item.Title, item.Link, publishedDate, result.Tags[i])
 
 			imageURL, err := extractor.ExtractImageURL(item.Content)
 			if err != nil || imageURL == "" {
@@ -160,3 +157,31 @@ func main() {
 	elapsed := time.Since(start)
 	log.Printf("所要時間: %s", elapsed)
 }
+
+// あなたのmain関数を確認しました。以下の考慮点や問題点が挙げられます：
+
+// セキュリティリスク:
+
+// dbURLに直接接続情報をハードコードしています。環境変数または設定ファイルから読み込む方がセキュリティ上好ましいです。データベース情報、特にパスワードはハードコードしないようにしましょう。
+// 同様に、S3のアクセスキーとシークレットキーをログに出力するのはセキュリティ上好ましくありません。
+// エラーハンドリング:
+
+// データベースへの接続に失敗した場合、ログにエラーを出力するだけで続行します。接続が必須であれば、エラーを出力してプログラムを終了する方が安全です。
+// .envファイルの読み込みが失敗してもプログラムは続行します。これが意図的でなければ、適切にエラーハンドリングする必要があります。
+// リソースのリーク:
+
+// http.Clientを繰り返し作成しています。代わりに、単一のhttp.Clientを再利用する方が効率的です。
+// コードのメンテナンス性:
+
+// main関数が長くなっており、多くの機能を持っています。個々の処理をより小さな関数に分割して、main関数の見通しを良くすると良いでしょう。
+// ハードコードされている値（たとえば、S3のバケット名"erorice"やタイムアウトの時間4 * time.Second）を定数または設定ファイルから取得することを検討してみてください。
+// パフォーマンス:
+
+// 多数のRSSフィードを同時にフェッチする場合、http.Clientのタイムアウトや同時接続数の最大値を調整することでパフォーマンスを最適化できる可能性があります。
+// 引数のバリデーション:
+
+// コマンドライン引数として受け取るsegmentIndexのバリデーションは非常に単純です。利用者が不正な入力を与えた場合のエラーメッセージやヘルプメッセージを提供して、どのような入力が期待されているのかを明確にすると良いでしょう。
+// 不要なコード:
+
+// 使われていないインポート（もしあれば）は削除すると良いでしょう。GoのツールやIDEは、通常、これを自動的に識別してくれます。
+// これらの点を考慮して、コードの改善を行うと、より安全でメンテナンスしやすいプログラムになるでしょう。
