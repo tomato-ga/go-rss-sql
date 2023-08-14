@@ -1,5 +1,18 @@
 package rssList
 
+// 分割処理用
+func GetSegment(index int, totalSegments int) []string {
+	segmentSize := len(Rss_urls) / totalSegments
+	start := index * segmentSize
+	end := (index + 1) * segmentSize
+
+	if index == totalSegments-1 {
+		return Rss_urls[start:]
+	} else {
+		return Rss_urls[start:end]
+	}
+}
+
 var Rss_urls = []string{
 
 	"http://uretarest.blogterest.net/feed/",
@@ -650,9 +663,9 @@ var Rss_urls = []string{
 	"http://adarutogannma.blogterest.net/feed/",
 	"https://omeko-spice.tokyo/feed",
 	"https://senzuri-rion.xyz/feed/",
-	"http://maison-ichimotsu.com/feed/",
+	// "http://maison-ichimotsu.com/feed/",
 	"http://bigtitsyusurumo3mo3.site/feed",
-	"http://bakunyupremium.blog.2nt.com/?xml",
+	// "http://bakunyupremium.blog.2nt.com/?xml",
 	"http://punitaringu.blogterest.net/feed/",
 	"https://daisyougun.biz/?feed=rss2",
 	"https://ntrstory.info/feed",
@@ -824,7 +837,7 @@ var Rss_urls = []string{
 	"https://succubus1919.com/comments/feed/",
 	"https://shikoshikoland.com/?feed=comments-rss2",
 	"https://analfuck.site/feed/",
-	"http://wwwsk2.blog.2nt.com/?xml",
+	// "http://wwwsk2.blog.2nt.com/?xml",
 	"http://www.eros-group.net/comments/feed",
 	"https://www.bdsm911.xyz/feed/",
 	"https://syukan.chinsiko.xyz/feed",

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,18 @@ func fetchFeed(url string, resultChan chan<- FeedResult, wg *sync.WaitGroup) {
 }
 
 func main() {
+
+	if len(os.Args) < 2 {
+		log.Fatalf("セグメントインデックスを指定してください")
+	}
+
+	segmentIndex, err := strconv.Atoi(os.Args[1])
+	if err != nil || segmentIndex < 0 || segmentIndex > 2 {
+		log.Fatalf("セグメントインデックスは0, 1, 2のいずれかでなければなりません")
+	}
+
+	urls := rssList.GetSegment(segmentIndex, 3)
+
 	// ログファイルの設定
 	logFile, err := os.OpenFile("./app.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
@@ -75,8 +88,8 @@ func main() {
 	start := time.Now()
 	var wg sync.WaitGroup
 
-	resultChan := make(chan FeedResult, len(rssList.Rss_urls))
-	for _, url := range rssList.Rss_urls {
+	resultChan := make(chan FeedResult, len(urls)) // `rssList.Rss_urls` を `urls` に変更
+	for _, url := range urls {                     // `rssList.Rss_urls` を `urls` に変更
 		wg.Add(1)
 		go fetchFeed(url, resultChan, &wg)
 	}
@@ -97,6 +110,7 @@ func main() {
 
 		var objectURLs []string
 
+		// TODO データベースに存在するかどうか確認。もう一度やり直し。URLを減らす
 		for i, item := range result.Feed.Items {
 			var existingRss dbmanager.Rss
 			if !db.Where("link = ?", item.Link).First(&existingRss).RecordNotFound() {
