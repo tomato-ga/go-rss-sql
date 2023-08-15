@@ -1,12 +1,13 @@
 package dbmanager
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"time"
 
-	"github.com/jinzhu/gorm"
-	_ "github.com/jinzhu/gorm/dialects/postgres"
 	"github.com/mmcdole/gofeed"
+	"gorm.io/gorm"
 )
 
 type Site struct {
@@ -16,7 +17,6 @@ type Site struct {
 	Rss  []Rss  `gorm:"foreignkey:SiteID"`
 }
 
-// TableName sets the insert table name for this struct type
 func (Site) TableName() string {
 	return "sites"
 }
@@ -32,7 +32,6 @@ type Rss struct {
 	Tag         string
 }
 
-// TableName sets the insert table name for this struct type
 func (Rss) TableName() string {
 	return "rsses"
 }
@@ -41,8 +40,8 @@ func SaveSiteAndFeedItemsToDB(db *gorm.DB, siteName, siteURL string, feed *gofee
 	db.AutoMigrate(&Site{}, &Rss{})
 
 	var site Site
-	if notFound := db.Where("url = ?", siteURL).First(&site).RecordNotFound(); notFound {
-		// If the site does not exist yet, create a new record
+	result := db.Where("url = ?", siteURL).First(&site)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		site = Site{
 			Name: siteName,
 			URL:  siteURL,
@@ -51,6 +50,9 @@ func SaveSiteAndFeedItemsToDB(db *gorm.DB, siteName, siteURL string, feed *gofee
 			return fmt.Errorf("failed to insert new site: %w", err)
 		}
 	}
+
+	var rssItems []Rss
+	linksSeen := make(map[string]bool) // リンクの一意性を保証するためのマップ
 
 	for i, item := range feed.Items {
 		publishedAt, err := time.Parse(time.RFC1123, item.Published)
@@ -68,27 +70,49 @@ func SaveSiteAndFeedItemsToDB(db *gorm.DB, siteName, siteURL string, feed *gofee
 
 		var imgurl string
 		if i < len(objectURLs) {
-			imgurl = objectURLs[i] // Set the actual image URL only if it exists
+			imgurl = objectURLs[i]
 		} else {
-			imgurl = "" // Fallback or default value
+			imgurl = ""
 		}
 
 		var rss Rss
-		if db.Where("link = ?", item.Link).First(&rss).RecordNotFound() {
-			rss = Rss{
-				Title:       item.Title,
-				Link:        item.Link,
-				PublishedAt: publishedAt,
-				SiteID:      site.ID,
-				Description: item.Description,
-				Imgurl:      imgurl,
-				Tag:         tags,
-			}
-			if err := db.Create(&rss).Error; err != nil {
-				return fmt.Errorf("failed to insert new RSS item: %w", err)
+		result := db.Where("link = ?", item.Link).First(&rss)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			if _, exists := linksSeen[item.Link]; !exists { // 重複チェック
+				rss = Rss{
+					Title:       item.Title,
+					Link:        item.Link,
+					PublishedAt: publishedAt,
+					SiteID:      site.ID,
+					Description: item.Description,
+					Imgurl:      imgurl,
+					Tag:         tags,
+				}
+				rssItems = append(rssItems, rss)
+				linksSeen[item.Link] = true // マップにリンクを追加
 			}
 		}
 	}
 
+	numBatches := len(rssItems) / 500
+	if len(rssItems)%500 != 0 {
+		numBatches++
+	}
+	log.Printf("Number of batches: %d", numBatches)
+
+	// デバッグ用：rssItemsの内容をログに出力
+	log.Printf("DB保存されるアイテム: %d", len(rssItems))
+	for _, rssItem := range rssItems {
+		log.Printf("Title: %s, Link: %s", rssItem.Title, rssItem.Link)
+	}
+
+	if len(rssItems) > 0 {
+		if err := db.CreateInBatches(rssItems, 500).Error; err != nil {
+			return fmt.Errorf("failed to insert RSS items in batches: %w", err)
+		}
+		log.Printf("データベースに保存されたアイテム数: %d", len(rssItems)) // データベースに保存した後のログメッセージ
+	}
+
 	return nil
+
 }

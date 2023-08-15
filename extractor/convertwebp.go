@@ -9,13 +9,20 @@ import (
 	_ "image/png"  // This is required to decode png images
 	"net/http"
 	"strings"
+	"time"
 
 	webp "github.com/chai2010/webp"
 )
 
 func ConvertToWebP(url string) ([]byte, error) {
+	// カスタムHTTPクライアントを作成
+	timeout := time.Duration(5 * time.Second)
+	client := http.Client{
+		Timeout: timeout,
+	}
+
 	// 事前にHTTPステータスをチェック
-	resp, err := http.Head(url)
+	resp, err := client.Head(url)
 	if err != nil {
 		return nil, fmt.Errorf("HTTPヘッダの取得時のエラー: %w", err)
 	}
@@ -30,7 +37,7 @@ func ConvertToWebP(url string) ([]byte, error) {
 	}
 
 	// 画像を取得
-	resp, err = http.Get(url)
+	resp, err = client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("画像の取得時のエラー: %w", err)
 	}
